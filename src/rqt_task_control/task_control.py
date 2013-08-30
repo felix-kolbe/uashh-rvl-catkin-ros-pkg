@@ -3,12 +3,16 @@ import os
 import rospy
 import rospkg
 
+from actionlib import SimpleActionClient
+
 from qt_gui.plugin import Plugin
 from python_qt_binding import loadUi
 from python_qt_binding.QtCore import Signal, Slot
 from python_qt_binding.QtGui import QWidget, QPushButton, QGridLayout, QSizePolicy
 
 from std_msgs.msg import String
+
+from task_msgs.msg import TaskActivationAction, TaskActivationGoal
 
 class TaskControl(Plugin):
 
@@ -53,16 +57,25 @@ class TaskControl(Plugin):
         context.add_widget(self._widget)
 
 
+        self._task_list_receiver_signal.connect(self.receive_task_list_slot)
+
         self._task_list_sub = rospy.Subscriber('/task/available_tasks', String, self.task_list_callback)
         self._task_pub = rospy.Publisher('/task', String)
 
-        self._task_list_receiver_signal.connect(self.receive_task_list_slot)
+        self._action_client = SimpleActionClient('activate_task', TaskActivationAction)
+        self._action_client.wait_for_server()
+
 
         self._task_buttons = []
 
         self._layout = QGridLayout()
         self._widget.scrollAreaWidgetContents.setLayout(self._layout)
 
+        self._cancel_button = QPushButton('cancel current task', self._widget.scrollAreaWidgetContents)
+        self._cancel_button.clicked.connect(self.cancel_button_click_slot)
+        self._cancel_button.setSizePolicy(QSizePolicy.MinimumExpanding,
+                                          QSizePolicy.MinimumExpanding)
+        self._layout.addWidget(self._cancel_button)
 
 
     def task_list_callback(self, msg):
@@ -96,6 +109,14 @@ class TaskControl(Plugin):
         clicked_task = clicked_button.text()
         print clicked_task
         self._task_pub.publish(clicked_task)
+        goal = TaskActivationGoal()
+        goal.task_id = clicked_task
+        self._action_client.send_goal(goal)
+
+    @Slot()
+    def cancel_button_click_slot(self):
+            print 'cancelling goal'
+            self._action_client.cancel_all_goals()
 
 
     def shutdown_plugin(self):

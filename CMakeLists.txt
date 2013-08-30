@@ -4,7 +4,7 @@ project(rqt_task_control)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS rospy rqt_gui rqt_gui_py)
+find_package(catkin REQUIRED COMPONENTS rospy rqt_gui rqt_gui_py actionlib)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
