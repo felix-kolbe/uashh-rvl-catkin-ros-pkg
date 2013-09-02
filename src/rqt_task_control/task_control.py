@@ -8,7 +8,7 @@ from actionlib import SimpleActionClient
 from qt_gui.plugin import Plugin
 from python_qt_binding import loadUi
 from python_qt_binding.QtCore import Signal, Slot
-from python_qt_binding.QtGui import QWidget, QPushButton, QGridLayout, QSizePolicy
+from python_qt_binding.QtGui import QWidget, QPushButton, QBoxLayout, QSizePolicy
 
 from std_msgs.msg import String
 
@@ -56,19 +56,13 @@ class TaskControl(Plugin):
         # Add widget to the user interface
         context.add_widget(self._widget)
 
-
-        self._task_list_receiver_signal.connect(self.receive_task_list_slot)
-
-        self._task_list_sub = rospy.Subscriber('/task/available_tasks', String, self.task_list_callback)
-        self._task_pub = rospy.Publisher('/task', String)
-
-        self._action_client = SimpleActionClient('activate_task', TaskActivationAction)
-        self._action_client.wait_for_server()
-
+        # Data
 
         self._task_buttons = []
 
-        self._layout = QGridLayout()
+        # Additional widgets
+
+        self._layout = QBoxLayout(QBoxLayout.TopToBottom)
         self._widget.scrollAreaWidgetContents.setLayout(self._layout)
 
         self._cancel_button = QPushButton('cancel current task', self._widget.scrollAreaWidgetContents)
@@ -76,6 +70,19 @@ class TaskControl(Plugin):
         self._cancel_button.setSizePolicy(QSizePolicy.MinimumExpanding,
                                           QSizePolicy.MinimumExpanding)
         self._layout.addWidget(self._cancel_button)
+
+
+        # Signals
+
+        self._task_list_receiver_signal.connect(self.receive_task_list_slot)
+
+        # ROS
+
+        self._task_list_sub = rospy.Subscriber('/task/available_tasks', String, self.task_list_callback)
+        self._task_pub = rospy.Publisher('/task', String)
+
+        self._action_client = SimpleActionClient('activate_task', TaskActivationAction)
+        self._action_client.wait_for_server()
 
 
     def task_list_callback(self, msg):
@@ -86,7 +93,7 @@ class TaskControl(Plugin):
 
     @Slot(list)
     def receive_task_list_slot(self, task_list):
-        print "slot received task list:", task_list
+        rospy.logdebug("slot received task list: %s", task_list)
         self.generate_task_buttons(task_list)
 
     def generate_task_buttons(self, task_list):
@@ -102,7 +109,6 @@ class TaskControl(Plugin):
             self._layout.addWidget(button)
             self._task_buttons.append(button)
 
-
     @Slot()
     def task_buttons_click_slot(self):
         clicked_button = self.sender()
@@ -111,29 +117,32 @@ class TaskControl(Plugin):
         self._task_pub.publish(clicked_task)
         goal = TaskActivationGoal()
         goal.task_id = clicked_task
+        # self._action_client.stop_tracking_goal() needed?
         self._action_client.send_goal(goal)
 
     @Slot()
     def cancel_button_click_slot(self):
-            print 'cancelling goal'
+            rospy.loginfo("cancelling goal")
             self._action_client.cancel_all_goals()
 
-
     def shutdown_plugin(self):
-        # TODO unregister all publishers here
-        pass
+        self._task_list_sub.unregister()
+        self._action_client.stop_tracking_goal()
 
     def save_settings(self, plugin_settings, instance_settings):
-        # TODO save intrinsic configuration, usually using:
-        # instance_settings.set_value(k, v)
-        pass
+        instance_settings.set_value('button_layout',
+                    'horizontal'
+                    if self._layout.direction() == QBoxLayout.LeftToRight
+                    else 'vertical')
 
     def restore_settings(self, plugin_settings, instance_settings):
-        # TODO restore intrinsic configuration, usually using:
-        # v = instance_settings.value(k)
-        pass
+        if instance_settings.value('button_layout') == 'horizontal':
+            self._layout.setDirection(QBoxLayout.LeftToRight)
+        else:
+            self._layout.setDirection(QBoxLayout.TopToBottom)
 
-    #def trigger_configuration(self):
-        # Comment in to signal that the plugin has a way to configure
-        # This will enable a setting button (gear icon) in each dock widget title bar
-        # Usually used to open a modal configuration dialog
+    def trigger_configuration(self):
+        if self._layout.direction() == QBoxLayout.TopToBottom:
+            self._layout.setDirection(QBoxLayout.LeftToRight)
+        else:
+            self._layout.setDirection(QBoxLayout.TopToBottom)
