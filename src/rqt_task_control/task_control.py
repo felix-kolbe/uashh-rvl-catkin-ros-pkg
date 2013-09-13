@@ -11,12 +11,35 @@ from python_qt_binding.QtCore import Signal, Slot
 from python_qt_binding.QtGui import QWidget, QPushButton, QBoxLayout, QSizePolicy
 
 from std_msgs.msg import String
-
 from task_msgs.msg import TaskActivationAction, TaskActivationGoal
+from actionlib_msgs.msg import GoalStatus
+
+
+
+class TaskInfo:
+    """self.status being an integer from actionlib_msgs/GoalStatus"""
+    def __init__(self, name, button, status=None):
+        self.name = name
+        self.button = button
+        self.status = status
+
 
 class TaskControl(Plugin):
 
-    _task_list_receiver_signal = Signal(list)
+
+    _receive_task_list_signal = Signal(list)
+    _refresh_button_highlighting_signal = Signal()
+
+    state_colors = {GoalStatus.PENDING: 'greenyellow',
+                    GoalStatus.ACTIVE: 'yellow',
+                    GoalStatus.PREEMPTED: 'orangered',
+                    GoalStatus.SUCCEEDED: 'lightgreen',
+                    GoalStatus.ABORTED: 'red',
+                    GoalStatus.REJECTED: 'darkred',
+                    GoalStatus.PREEMPTING: 'darkorange',
+                    GoalStatus.RECALLING: 'violet',
+                    GoalStatus.RECALLED: 'darkviolet',
+                    GoalStatus.LOST: 'MediumSlateBlue'}
 
     def __init__(self, context):
         super(TaskControl, self).__init__(context)
@@ -56,9 +79,11 @@ class TaskControl(Plugin):
         # Add widget to the user interface
         context.add_widget(self._widget)
 
+
         # Data
 
-        self._task_buttons = []
+        self._task_map = {} # mapping id strings to TaskInfo objects
+        self._active_task_name = None
 
         # Additional widgets
 
@@ -74,7 +99,8 @@ class TaskControl(Plugin):
 
         # Signals
 
-        self._task_list_receiver_signal.connect(self.receive_task_list_slot)
+        self._receive_task_list_signal.connect(self.receive_task_list_slot)
+        self._refresh_button_highlighting_signal.connect(self.refresh_button_highlighting)
 
         # ROS
 
@@ -82,14 +108,13 @@ class TaskControl(Plugin):
         self._task_pub = rospy.Publisher('/task', String)
 
         self._action_client = SimpleActionClient('activate_task', TaskActivationAction)
-        self._action_client.wait_for_server()
+#        self._action_client.wait_for_server()
 
 
     def task_list_callback(self, msg):
         task_list = [task.strip() for task in msg.data.split(',')]
-        #print "received tasks list: ", msg
-        #self.generate_task_buttons(task_list)
-        self._task_list_receiver_signal.emit(task_list)
+        rospy.logdebug("received tasks list: %s", msg)
+        self._receive_task_list_signal.emit(task_list)
 
     @Slot(list)
     def receive_task_list_slot(self, task_list):
@@ -97,33 +122,84 @@ class TaskControl(Plugin):
         self.generate_task_buttons(task_list)
 
     def generate_task_buttons(self, task_list):
-        for button in self._task_buttons:
-            button.setParent(None)
-        self._task_buttons = []
+        # remove existing tasks that aren't in received list
+        for name, task in self._task_map.viewitems():
+            if name not in task_list:
+                task.button.setParent(None)
+                del self._task_map[name]
 
-        for task in task_list:
-            button = QPushButton(task, self._widget.scrollAreaWidgetContents)
-            button.clicked.connect(self.task_buttons_click_slot)
-            button.setSizePolicy(QSizePolicy.MinimumExpanding,
-                                 QSizePolicy.MinimumExpanding)
-            self._layout.addWidget(button)
-            self._task_buttons.append(button)
+        # add received tasks that we don't have yet
+        for name in task_list:
+            if name not in self._task_map:
+                button = QPushButton(name, self._widget.scrollAreaWidgetContents)
+                button.clicked.connect(self.task_buttons_click_slot)
+                button.setSizePolicy(QSizePolicy.MinimumExpanding,
+                                     QSizePolicy.MinimumExpanding)
+                self._layout.addWidget(button)
+                self._task_map[name] = TaskInfo(name, button)
+
+        self.refresh_button_highlighting()
 
     @Slot()
     def task_buttons_click_slot(self):
+
         clicked_button = self.sender()
-        clicked_task = clicked_button.text()
-        print clicked_task
-        self._task_pub.publish(clicked_task)
+        task_name = clicked_button.text()
+        rospy.loginfo("activating task %s", task_name)
+        self._task_pub.publish(task_name)
         goal = TaskActivationGoal()
-        goal.task_id = clicked_task
-        # self._action_client.stop_tracking_goal() needed?
-        self._action_client.send_goal(goal)
+        goal.task_id = task_name
+        self._action_client.send_goal(goal, self.task_done_cb,
+                                      self.task_active_cb, self.task_feedback_cb)
+        if self._active_task_name is not None:
+            # set active task status to unknown as we cannot track it anymore
+            self._task_map[self._active_task_name].status = GoalStatus.LOST
+        self._active_task_name = task_name
+        self.refresh_button_highlighting()
 
     @Slot()
     def cancel_button_click_slot(self):
-            rospy.loginfo("cancelling goal")
-            self._action_client.cancel_all_goals()
+        rospy.loginfo("cancelling goal")
+        self._action_client.cancel_goal()
+        self.refresh_button_highlighting()
+
+
+    def task_feedback_cb(self, feedback):
+        rospy.loginfo("feedback got: %S", feedback)
+        print feedback
+        self._task_map[self._active_task_name].status = feedback.status.status
+        self._refresh_button_highlighting_signal.emit()
+
+    def task_done_cb(self, status, status_text):
+        """Status being integer from actionlib_msgs/GoalStatus"""
+        rospy.loginfo("done got: %s %r", status, status_text)
+        self._task_map[self._active_task_name].status = status
+        self._active_task_name = None
+        self._refresh_button_highlighting_signal.emit()
+
+    def task_active_cb(self):
+        rospy.loginfo("active")
+        print self._task_map[self._active_task_name]
+        self._task_map[self._active_task_name].status = GoalStatus.ACTIVE
+        self._refresh_button_highlighting_signal.emit()
+
+
+    @Slot()
+    def refresh_button_highlighting(self):
+        for task in self._task_map.itervalues():
+            #print 'task: ', task
+            if task.status is not None:
+                color = TaskControl.state_colors[task.status]
+                task.button.setStyleSheet('background-color: %s' % color)
+
+
+        # color current button
+        if self._active_task_name is not None:
+            button = self._task_map[self._active_task_name].button
+            color = TaskControl.state_colors[self._action_client.get_state()]
+            button.setStyleSheet('background-color: %s' % color)
+
+
 
     def shutdown_plugin(self):
         self._task_list_sub.unregister()
