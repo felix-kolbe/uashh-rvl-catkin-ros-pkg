@@ -123,10 +123,13 @@ class TaskControl(Plugin):
 
     def generate_task_buttons(self, task_list):
         # remove existing tasks that aren't in received list
-        for name, task in self._task_map.viewitems():
-            if name not in task_list:
-                task.button.setParent(None)
-                del self._task_map[name]
+        # two steps to avoid modifying the dict while iterating
+        tasks_to_remove = [name
+                           for name in self._task_map
+                           if name not in task_list]
+        for name in tasks_to_remove:
+            self._task_map[name].button.setParent(None)
+            del self._task_map[name]
 
         # add received tasks that we don't have yet
         for name in task_list:
@@ -165,21 +168,21 @@ class TaskControl(Plugin):
 
 
     def task_feedback_cb(self, feedback):
-        rospy.loginfo("feedback got: %S", feedback)
+        rospy.loginfo("task feedback callback: %S", feedback)
         print feedback
         self._task_map[self._active_task_name].status = feedback.status.status
         self._refresh_button_highlighting_signal.emit()
 
     def task_done_cb(self, status, status_text):
         """Status being integer from actionlib_msgs/GoalStatus"""
-        rospy.loginfo("done got: %s %r", status, status_text)
+        rospy.loginfo("task done callback: %s %r", status, status_text)
         self._task_map[self._active_task_name].status = status
         self._active_task_name = None
         self._refresh_button_highlighting_signal.emit()
 
     def task_active_cb(self):
-        rospy.loginfo("active")
-        print self._task_map[self._active_task_name]
+        rospy.loginfo("task active callback: %s" %
+                      self._task_map[self._active_task_name].name)
         self._task_map[self._active_task_name].status = GoalStatus.ACTIVE
         self._refresh_button_highlighting_signal.emit()
 
