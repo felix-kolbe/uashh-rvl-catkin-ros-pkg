@@ -90,7 +90,7 @@ class TaskControl(Plugin):
         self._layout = QBoxLayout(QBoxLayout.TopToBottom)
         self._widget.scrollAreaWidgetContents.setLayout(self._layout)
 
-        self._cancel_button = QPushButton('cancel current task', self._widget.scrollAreaWidgetContents)
+        self._cancel_button = QPushButton('cancel all tasks', self._widget.scrollAreaWidgetContents)
         self._cancel_button.clicked.connect(self.cancel_button_click_slot)
         self._cancel_button.setSizePolicy(QSizePolicy.MinimumExpanding,
                                           QSizePolicy.MinimumExpanding)
@@ -108,7 +108,6 @@ class TaskControl(Plugin):
         self._task_pub = rospy.Publisher('/task', String)
 
         self._action_client = SimpleActionClient('activate_task', TaskActivationAction)
-#        self._action_client.wait_for_server()
 
 
     def task_list_callback(self, msg):
@@ -162,8 +161,8 @@ class TaskControl(Plugin):
 
     @Slot()
     def cancel_button_click_slot(self):
-        rospy.loginfo("cancelling goal")
-        self._action_client.cancel_goal()
+        rospy.loginfo("cancelling all goals")
+        self._action_client.cancel_all_goals()
         self.refresh_button_highlighting()
 
 
@@ -198,6 +197,9 @@ class TaskControl(Plugin):
 
         # color current button
         if self._active_task_name is not None:
+            if not self._active_task_name in self._task_map:
+                rospy.logwarn("active task missing in updated available task list, discarding task")
+                self._active_task_name = None
             button = self._task_map[self._active_task_name].button
             color = TaskControl.state_colors[self._action_client.get_state()]
             button.setStyleSheet('background-color: %s' % color)
