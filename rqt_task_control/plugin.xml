@@ -1,0 +1,12 @@
+<library path="src">
+  <class name="TaskControl" type="rqt_task_control.task_control.TaskControl" base_class_type="rqt_gui_py::Plugin">
+    <description>
+      A Python GUI plugin for controlling the active state machine task.
+    </description>
+    <qtgui>
+      <label>Task Control</label>
+      <icon type="theme">task-due</icon>
+      <statustip>A Python GUI plugin for controlling the active state machine task.</statustip>
+    </qtgui>
+  </class>
+</library>
